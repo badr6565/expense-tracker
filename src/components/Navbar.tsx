@@ -1,6 +1,8 @@
 'use client';
 
-import { Download, Plus, Wallet } from 'lucide-react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { Download, Plus, Wallet, Tag } from 'lucide-react';
 
 interface NavbarProps {
   onAddClick: () => void;
@@ -8,19 +10,35 @@ interface NavbarProps {
 }
 
 export default function Navbar({ onAddClick, onExport }: NavbarProps) {
+  const pathname = usePathname();
+
   return (
     <nav className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-gray-100 shadow-sm">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-indigo-600 rounded-xl">
-              <Wallet size={20} className="text-white" />
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-indigo-600 rounded-xl">
+                <Wallet size={20} className="text-white" />
+              </div>
+              <div>
+                <h1 className="text-lg font-bold text-gray-900 leading-none">ExpenseTracker</h1>
+                <p className="text-xs text-gray-400 leading-none mt-0.5">Personal Finance Manager</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-lg font-bold text-gray-900 leading-none">ExpenseTracker</h1>
-              <p className="text-xs text-gray-400 leading-none mt-0.5">Personal Finance Manager</p>
-            </div>
+            {/* Nav links */}
+            <Link
+              href="/categories"
+              className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                pathname === '/categories'
+                  ? 'bg-indigo-50 text-indigo-700'
+                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              <Tag size={14} />
+              Categories
+            </Link>
           </div>
 
           {/* Actions */}
