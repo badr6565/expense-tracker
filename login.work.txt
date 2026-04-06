@@ -1,0 +1,77 @@
+FEATURE: Login Page
+BRANCH: feature/login
+WORKTREE: expense-tracker-login
+BUILD STATUS: PASSED
+
+== WHAT WAS IMPLEMENTED ==
+
+A complete login page for the ExpenseTracker app with localStorage-based authentication.
+Includes a demo user seeded automatically, "Remember me" (persists email in localStorage),
+and an AuthGuard component protecting all non-public routes.
+
+== FILES CREATED ==
+
+src/lib/auth.ts
+  - User type definition (id, name, email, passwordHash, createdAt)
+  - getUsers() / saveUsers() - localStorage CRUD for user list (key: et_users)
+  - findUserByEmail() - case-insensitive email lookup
+  - createUser() - creates user with btoa-encoded password, returns User
+  - verifyPassword(email, password) - returns User on success, null on failure
+  - getCurrentUser() / setCurrentUser() / logout() - session management (key: et_current_user)
+  - seedDemoUser() - creates demo@example.com / password123 if no users exist
+
+src/app/login/page.tsx
+  - 'use client' page
+  - useEffect: calls seedDemoUser() and restores remembered email
+  - Fields: Email, Password (show/hide toggle), Remember Me checkbox
+  - Validation: non-empty check before submit
+  - On success: setCurrentUser() + router.replace('/')
+  - Error banner for invalid credentials
+  - Loading state on submit button
+  - Demo credentials hint box (indigo-50 bg): demo@example.com / password123
+  - Link to /signup
+  - App logo (Wallet + "ExpenseTracker") at top
+  - Centered white card on gray-50 background
+
+src/components/AuthGuard.tsx
+  - 'use client' component wrapping entire app via layout.tsx
+  - Reads getCurrentUser() on mount
+  - Unauthenticated + non-public path → redirect to /login
+  - Authenticated + public path (/login, /signup) → redirect to /
+  - Shows spinner while checking auth on protected routes
+
+== FILES MODIFIED ==
+
+src/app/layout.tsx
+  - Added import AuthGuard from "@/components/AuthGuard"
+  - Wrapped {children} with <AuthGuard>{children}</AuthGuard>
+
+== DEPENDENCIES ADDED ==
+None (lucide-react already installed)
+
+== BUILD RESULT ==
+Route (app)                              Size     First Load JS
+┌ ○ /                                    135 kB          223 kB
+├ ○ /_not-found                          873 B          88.2 kB
+└ ○ /login                               11.9 kB        99.2 kB
+✓ Compiled successfully, no type errors
+
+== INTEGRATION NOTES ==
+
+1. src/lib/auth.ts is identical to the signup feature — use one shared file in the
+   merged branch. Do not duplicate.
+
+2. AuthGuard must be added to root layout.tsx. Only do this once in the merged branch.
+
+3. The Navbar should show the current user's name and a logout button:
+   - Import getCurrentUser() from @/lib/auth
+   - Display user.name in the top right
+   - Logout button calls logout() then router.replace('/login')
+
+4. seedDemoUser() is called on every login page mount. It's idempotent (checks if
+   users array is empty first), so it's safe to call repeatedly.
+
+5. Remember Me stores the email in localStorage key 'et_remember_email'. On mount,
+   if this key exists, email is pre-filled and remember checkbox is checked.
+
+6. Integration order: merge login + signup together since they share auth.ts.

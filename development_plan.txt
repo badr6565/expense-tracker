@@ -1,0 +1,467 @@
+================================================================================
+  ML-POWERED EXPENSE CATEGORIZATION SYSTEM — TECHNICAL ANALYSIS
+  Project: expense-tracker (Next.js 14, localStorage, client-side only)
+  Date: 2026-04-06
+================================================================================
+
+CRITICAL CONSTRAINT: This app has no backend. All data lives in localStorage.
+The ML system must therefore run entirely in the browser. This shapes every
+architectural decision below.
+
+--------------------------------------------------------------------------------
+1. CORE TECHNICAL CHALLENGES
+--------------------------------------------------------------------------------
+
+1.1 Cold Start Problem
+    - New users have zero labeled history. With no backend, there is no global
+      shared model to bootstrap from. We must ship a pre-baked "seed model"
+      (a keyword/rule table compiled at build time) and transition to learned
+      weights as the user adds expenses.
+    - Mitigation: A hardcoded merchant-to-category map covers the 80% common
+      case immediately, requiring no training data at all.
+
+1.2 Tiny Vocabulary + Abbreviated Bank Descriptions
+    - Real bank transaction descriptions look like:
+        "POS DEBIT MCDNLDS #3421 VISA 0012"
+        "ACH TRANSFER NETFLIX.COM"
+        "SQ *CORNER BAKERY CAFE"
+    - They are noisy, truncated, and full of bank-specific prefixes that carry
+      no semantic signal. A naive bag-of-words model will overfit these tokens.
+    - Mitigation: A preprocessing pipeline strips common bank prefixes, POS
+      codes, card numbers, and normalizes whitespace before any feature
+      extraction.
+
+1.3 Class Imbalance
+    - With only 6 categories (Food, Transportation, Entertainment, Shopping,
+      Bills, Other), "Food" and "Bills" will dominate most users' histories.
+      "Entertainment" and "Transportation" will be underrepresented.
+    - Mitigation: Per-class weighted loss during any online update step.
+      The seed model is balanced by construction.
+
+1.4 Ambiguous Merchants
+    - "Amazon" maps to Shopping, Electronics, Books, Groceries, or Bills
+      depending on the specific purchase.
+    - "Walmart" is simultaneously Food and Shopping.
+    - Mitigation: Use amount as a co-feature. A $4.99 Amazon charge is likely
+      a digital subscription (Bills/Entertainment); $89.99 is likely Shopping.
+      Amount buckets (small/medium/large) combined with merchant name resolve
+      most ambiguities.
+
+1.5 Online Learning Stability
+    - As the user corrects suggestions, the model must update incrementally.
+      Naive gradient descent on a tiny dataset causes catastrophic forgetting
+      and oscillation.
+    - Mitigation: Maintain a small replay buffer (last 200 labeled examples).
+      Always retrain on the full buffer, not just new corrections. Cap buffer
+      at 500 to bound memory cost.
+
+1.6 Inference Latency
+    - Suggestion must appear as the user types (< 50ms). Heavy models like
+      BERT are completely off the table in a browser without a GPU.
+    - Mitigation: Logistic regression with TF-IDF features runs in < 1ms on
+      any modern device. No neural inference needed.
+
+1.7 Model Persistence
+    - localStorage is limited to ~5MB and is synchronous. A serialized model
+      must be compact.
+    - A Logistic Regression model for 6 classes over a ~500-word vocabulary
+      is 6 × 500 × 4 bytes = ~12KB. Easily fits. IndexedDB is a fallback if
+      we ever need more space.
+
+--------------------------------------------------------------------------------
+2. DATA TO COLLECT AND HOW
+--------------------------------------------------------------------------------
+
+2.1 Primary Training Signal
+    Stored in localStorage under key: "ml_training_data"
+    Schema (each record):
+    {
+      "description": "MCDNLDS #3421",          // raw user-entered text
+      "normalizedDesc": "mcdonalds",            // after preprocessing
+      "amount": 12.50,
+      "amountBucket": "small",                  // <20, 20-100, >100
+      "dayOfWeek": 1,                           // 0=Sun...6=Sat
+      "dayOfMonth": 15,
+      "month": 3,
+      "category": "Food",                       // ground truth (user confirmed)
+      "wasCorrection": true,                    // was suggestion wrong?
+      "timestamp": "2026-04-06T14:23:00Z"
+    }
+
+2.2 How Data Is Collected
+    - Auto-collect: Every expense the user saves becomes a training record.
+      Category is user-confirmed (either accepted suggestion or manually chosen).
+    - Correction signal: When user overrides a suggestion, "wasCorrection: true"
+      marks higher-value training examples. Weight these 2x in training.
+    - No passive collection: We do NOT collect data without a save event.
+      Partial descriptions typed but abandoned are discarded.
+
+2.3 What We Do NOT Collect
+    - Raw bank import data before user review
+    - Keystrokes or partial form state
+    - Anything ever sent off-device (no telemetry, no analytics calls)
+
+2.4 Data Volume Expectations
+    - Typical user adds 20-50 expenses/month.
+    - A useful personal model needs ~30-50 labeled examples minimum (about
+      1-2 months of use). Below this threshold, fall back to the seed model.
+    - After 200+ examples, the personal model should be highly accurate (>85%)
+      for that user's specific spending patterns.
+
+2.5 Feature Engineering (what goes into the model)
+    - TF-IDF token weights from normalized description (top 300 terms by IDF)
+    - Amount bucket (3 bins: small/medium/large, one-hot encoded)
+    - Day-of-week (7 bins, one-hot encoded) — captures commuting, weekend dining
+    - Is-recurring flag: description appeared 2+ times in last 60 days
+    Total feature vector: ~310 dimensions (sparse, computed in < 1ms)
+
+--------------------------------------------------------------------------------
+3. ML APPROACHES — RECOMMENDED ARCHITECTURE
+--------------------------------------------------------------------------------
+
+3.1 The Three-Layer Hybrid
+
+    LAYER 1: Deterministic Rule Engine (instant, 100% confidence)
+    ┌─────────────────────────────────────────────────────────────────┐
+    │ Exact merchant lookup table, compiled at build time.            │
+    │ ~200 common merchants → category.                               │
+    │ Examples:                                                       │
+    │   "mcdonald" → Food, "netflix" → Entertainment                 │
+    │   "uber" → Transportation, "spotify" → Entertainment           │
+    │   "electricity" → Bills, "gym" → Entertainment                 │
+    │ Normalized match (lowercase, strip punctuation).                │
+    │ If match found → return immediately, skip layers 2 and 3.      │
+    └─────────────────────────────────────────────────────────────────┘
+    Handles: ~60% of real-world expenses instantly.
+
+    LAYER 2: Personal Learned Model (< 1ms, personalized)
+    ┌─────────────────────────────────────────────────────────────────┐
+    │ Multinomial Logistic Regression trained on user's own history.  │
+    │ Features: TF-IDF(description) + amount bucket + day-of-week     │
+    │ Training: triggered after every 5 new corrections, or on app    │
+    │           load if pending corrections exist.                    │
+    │ Storage: serialized weight matrix in localStorage (~12KB)       │
+    │ Returns: {category, confidence: 0.0–1.0}                       │
+    │ Only active if user has ≥ 30 labeled examples.                  │
+    └─────────────────────────────────────────────────────────────────┘
+    Handles: Novel merchants that fit user's personal patterns.
+
+    LAYER 3: Similarity Fallback (< 5ms)
+    ┌─────────────────────────────────────────────────────────────────┐
+    │ Find the k=3 nearest neighbors in the user's labeled history    │
+    │ using cosine similarity on TF-IDF vectors.                      │
+    │ Vote on category by majority.                                   │
+    │ Used when Layer 2 confidence < 0.4.                             │
+    └─────────────────────────────────────────────────────────────────┘
+    Handles: Rare categories with few training examples.
+
+3.2 Inference Decision Tree
+    description + amount + date
+          │
+          ▼
+    Normalize description
+          │
+          ▼
+    Layer 1: Rule match? ──YES──▶ return category (confidence: 1.0)
+          │ NO
+          ▼
+    Layer 2 available? (≥30 examples)
+          │ YES → run logistic regression → confidence ≥ 0.5?
+          │              YES → return category + confidence
+          │              NO  → Layer 3 (kNN fallback)
+          │ NO  → Layer 3 (kNN fallback)
+          ▼
+    Layer 3: kNN vote → return category (confidence: 0.3–0.6)
+          │
+          ▼
+    If no examples: return null (UI shows no suggestion, all 6 buttons)
+
+3.3 Why Not Neural / LLM
+    - GPT-4 / Claude: Requires API call (network latency, cost, privacy risk)
+    - BERT in browser: 400MB model, 500ms+ inference, impractical
+    - TensorFlow.js MobileNet: Overkill — text classification is a solved
+      problem with logistic regression at this data scale
+    - The right tool here is the simplest one that works. Logistic regression
+      with good features outperforms neural models on datasets < 1000 examples.
+
+3.4 Implementation — Zero External Dependencies
+    All ML implemented from scratch in TypeScript:
+    - src/lib/ml/preprocessor.ts  — normalize descriptions
+    - src/lib/ml/vectorizer.ts    — TF-IDF computation + vocabulary building
+    - src/lib/ml/classifier.ts   — logistic regression (softmax) + SGD
+    - src/lib/ml/knn.ts          — cosine similarity k-nearest neighbor
+    - src/lib/ml/rules.ts        — deterministic merchant lookup table
+    - src/lib/ml/suggester.ts    — orchestrates the 3 layers, public API
+    - src/lib/ml/modelStorage.ts — serialize/deserialize to localStorage
+
+    No npm packages needed. Total code: ~400 lines.
+
+--------------------------------------------------------------------------------
+4. PRIVACY AND DATA SECURITY
+--------------------------------------------------------------------------------
+
+4.1 Data Never Leaves the Device
+    - All ML inference and training happens in the browser.
+    - No API calls for categorization. Not even to our own server.
+    - This is the strongest possible privacy guarantee.
+
+4.2 User Transparency & Control
+    - Settings page section: "Smart Suggestions"
+      ✓ Enable category suggestions (toggle)
+      ✓ Learn from my corrections (toggle, requires above)
+      [Clear suggestion history] button — wipes ml_training_data from localStorage
+      [Export my training data] button — downloads JSON for portability
+    - "Why this suggestion?" tooltip on every suggestion badge, showing:
+      "Matched 'netflix' in your history (seen 4 times as Entertainment)"
+
+4.3 localStorage Security Context
+    - localStorage is scoped to the origin (same-origin policy).
+    - No other site can read it.
+    - Vulnerable only to XSS. Since this is a Next.js app with no user-generated
+      HTML rendered raw, the XSS surface is low.
+    - We do NOT store raw financial amounts or account numbers in the ML model
+      weights — only learned statistical weights, which are not reversible.
+
+4.4 GDPR / CCPA Considerations (future)
+    - Right to erasure: [Clear suggestion history] satisfies this.
+    - Data portability: [Export] button satisfies this.
+    - No consent banner needed since data never leaves the device.
+    - If a backend is ever added: require explicit opt-in before syncing ML data.
+
+4.5 What the Model Weights Reveal
+    - The weight matrix encodes which words are associated with which categories.
+    - An attacker who reads localStorage sees weights like:
+      "mcdonald" → [0.9, 0.01, 0.02, 0.01, 0.01, 0.05]  (Food, Transp, ...)
+    - This is not reversible to specific amounts, dates, or transaction counts.
+    - The training buffer (raw records) is more sensitive. Consider:
+      Option A: Store only the model weights (delete raw buffer after retraining)
+      Option B: Store buffer but encrypted with a key derived from user password
+      Recommendation: Option A for simplicity. Raw buffer is not needed after
+      each retrain. Retrain on the fly from labeled expense history instead.
+
+--------------------------------------------------------------------------------
+5. USER EXPERIENCE FLOW
+--------------------------------------------------------------------------------
+
+5.1 ExpenseForm Enhancement (primary touch point)
+    Current flow: user fills Description → manually selects Category
+    New flow:
+
+    Step 1 — User types in Description field
+    Step 2 — After 300ms debounce (or on blur), suggester runs
+    Step 3 — Suggestion banner appears below Description:
+
+      ┌─────────────────────────────────────────────────────┐
+      │  Suggested: 🍔 Food  [✓ Accept]  [Change ▾]  [?]   │
+      └─────────────────────────────────────────────────────┘
+
+      - [✓ Accept] — fills Category field, collapses banner
+      - [Change ▾] — expands all 6 category buttons inline
+      - [?] — shows tooltip: "Why this?" explanation
+      - Banner only shown if confidence > 0.3, else show nothing
+
+    Step 4 — User saves expense
+      - If they accepted suggestion → record (description, category, wasCorrection: false)
+      - If they changed → record (description, userCategory, wasCorrection: true)
+      - Retrain if correction count since last train >= 5
+
+5.2 Confidence Visualization
+    - High confidence (> 0.75): suggestion shown with solid filled badge
+    - Medium confidence (0.5–0.75): suggestion shown with outlined badge + "?"
+    - Low confidence (0.3–0.5): suggestion shown with dashed badge + "Not sure?"
+    - Below 0.3: no suggestion shown (avoids training bad habits)
+
+5.3 First-Time Experience (Cold Start)
+    - On first expense, no suggestion is shown (no history yet).
+    - After the first 5 saved expenses, a banner appears:
+      "Smart suggestions are learning from your expenses. Keep adding to improve!"
+    - After 30 expenses, suggestions become active. A one-time notification:
+      "Smart suggestions are now active based on your history."
+
+5.4 Bulk Import Flow (if CSV import is added later)
+    - User uploads CSV of expenses without categories
+    - ML runs on all rows, shows confidence-sorted review table
+    - User can batch-accept high-confidence rows, manually review others
+    - All rows confirmed → added to history and training buffer
+
+5.5 Feedback Loop Visibility
+    - Settings page shows: "Suggestions accuracy: 87% (23 of 26 accepted)"
+    - This makes the learning visible and builds trust.
+
+--------------------------------------------------------------------------------
+6. EDGE CASES AND ERROR HANDLING
+--------------------------------------------------------------------------------
+
+6.1 Completely Empty Description
+    - Suggester receives "". Return null. Show no suggestion.
+    - Do not attempt to classify or log empty strings.
+
+6.2 Very Short Description (1-2 chars)
+    - Below 3 characters, skip TF-IDF (no vocabulary can be built).
+    - Rule-based layer still runs (catches "BP" → Transportation, etc.)
+    - Else: no suggestion.
+
+6.3 Corrupted Model in localStorage
+    - On load, wrap JSON.parse in try/catch.
+    - If model fails to deserialize (version mismatch, truncation):
+      → Delete corrupt model silently.
+      → Rebuild from labeled expense history on next retrain trigger.
+    - Never crash the app over a bad model.
+
+6.4 Model Version Mismatch
+    - Serialize a "modelVersion" field with every saved model.
+    - If loaded version !== current EXPECTED_VERSION constant:
+      → Discard old model (it may have incompatible feature dimensions).
+      → Retrain from scratch using existing expense history.
+    - This handles app updates that change the feature set.
+
+6.5 Insufficient Training Data (< 30 examples)
+    - Layer 2 disabled, Layer 3 runs on whatever exists.
+    - If < 5 examples: no suggestion shown at all.
+    - Graceful degradation, never a crash.
+
+6.6 Single-Category Dominance
+    - User who tracks only Food expenses: classifier degenerates (always says Food).
+    - Detection: if top predicted class probability > 0.95 for all inputs, and
+      that class has > 80% of training data, warn user in Settings:
+      "Your suggestions may be less accurate until you add more varied expenses."
+    - Do not apply confidence threshold workaround — just be transparent.
+
+6.7 localStorage Quota Exceeded
+    - On saveModel(), catch QuotaExceededError.
+    - Strategy: drop the training buffer (raw records), keep only model weights.
+    - If still fails: silently disable persistence. Model lives in memory only
+      for the session. Show a Settings warning: "Not enough storage for suggestions."
+
+6.8 Concurrent Tabs
+    - Two tabs could write to ml_training_data simultaneously.
+    - Use localStorage "storage" event to detect cross-tab writes.
+    - Last-write-wins is acceptable — model weights are convergent enough.
+    - Do not use locking (would require a service worker, too complex).
+
+6.9 Training During User Interaction
+    - Retraining on 200 records takes ~5ms in JS. Acceptable on main thread.
+    - If dataset grows beyond 1000 records (rare), move retraining to a
+      Web Worker to keep UI responsive.
+    - Threshold check: if records > 800, spin up worker.
+
+6.10 NaN / Infinity in Weight Matrix
+    - SGD with bad learning rate can produce NaN weights.
+    - After each training step: check for NaN/Infinity with Number.isFinite().
+    - If detected: reset weights to zeros and log a warning.
+    - This is a recovery path, not expected in normal operation.
+
+--------------------------------------------------------------------------------
+7. DEPLOYMENT AND MAINTENANCE STRATEGY
+--------------------------------------------------------------------------------
+
+7.1 Phased Rollout
+
+    Phase 1 — Seed Model Only (Week 1)
+    ─────────────────────────────────
+    Files added:
+      src/lib/ml/rules.ts         — 200-merchant lookup table
+      src/lib/ml/preprocessor.ts  — normalization pipeline
+      src/lib/ml/suggester.ts     — public API (Layer 1 only)
+    ExpenseForm updated to show suggestions from Layer 1.
+    No training, no persistence. Zero risk. 60% accuracy out of the box.
+
+    Phase 2 — Personal Learned Model (Week 2)
+    ──────────────────────────────────────────
+    Files added:
+      src/lib/ml/vectorizer.ts
+      src/lib/ml/classifier.ts
+      src/lib/ml/modelStorage.ts
+    Training triggered on correction events. Layer 2 active after 30 examples.
+
+    Phase 3 — kNN Fallback + UX Polish (Week 3)
+    ────────────────────────────────────────────
+    Files added:
+      src/lib/ml/knn.ts
+    Confidence visualization added.
+    "Why this suggestion?" tooltip implemented.
+    Settings section for smart suggestions added.
+
+    Phase 4 — Hardening & Metrics (Week 4)
+    ────────────────────────────────────────
+    - Acceptance rate tracked in localStorage (accepted/total suggestions).
+    - Settings dashboard shows accuracy.
+    - Edge case handling (quota exceeded, version mismatch) implemented.
+    - Web Worker for large datasets.
+
+7.2 Testing Strategy
+    Unit tests (Jest + jsdom):
+      - preprocessor.ts: test normalization of 20 real bank description formats
+      - vectorizer.ts: verify TF-IDF math on a 5-document corpus
+      - classifier.ts: verify softmax output sums to 1.0, weights update direction
+      - rules.ts: verify all 200 merchants produce expected categories
+      - suggester.ts: integration test — inject mock expenses, verify suggestions
+
+    Accuracy tests (offline, run during CI):
+      - Synthetic dataset of 100 labeled expenses
+      - Assert Layer 1 + Layer 2 combined accuracy > 80%
+
+    No live ML testing in Playwright/E2E (too slow, non-deterministic).
+
+7.3 Monitoring (Client-Side Only — No Analytics)
+    Track in localStorage:
+      ml_stats: {
+        totalSuggestions: number,
+        accepted: number,
+        corrected: number,
+        noSuggestion: number,
+        lastTrainedAt: string
+      }
+
+    Surface in Settings: "Smart Suggestions: 87% accepted (52 of 60)"
+    No server-side telemetry. Privacy-first.
+
+7.4 Model Updates After App Upgrades
+    Strategy for when the feature set changes (app update):
+    1. Bump EXPECTED_MODEL_VERSION constant in classifier.ts
+    2. On app load, compare stored version with expected
+    3. If mismatch → rebuild model from existing expense history automatically
+    4. User sees no disruption (suggestions may be less accurate for a few days)
+
+7.5 Long-Term Maintenance
+    - The merchant lookup table (rules.ts) needs periodic additions.
+      New popular merchants should be added as they appear in corrections data.
+      Since we have no server, this is a manual update in the codebase.
+      Recommend: quarterly review of any "Other" categories to find common
+      unrecognized merchants worth adding to the rules table.
+
+    - The logistic regression approach does not need retraining infrastructure,
+      A/B testing pipelines, or model registries. It runs in the user's browser.
+      This is the key advantage of the chosen approach for a localStorage app.
+
+7.6 Future Migration Path (If Backend Is Added)
+    If the app ever gets a backend:
+    1. Upload training buffer to server (with user consent).
+    2. Train a shared model on anonymized cross-user data (federated-style).
+    3. Ship a better seed model (covers more merchants, better generalization).
+    4. Personal fine-tuning still happens client-side (privacy preserved).
+    The localStorage-first architecture is forward-compatible with this path.
+
+--------------------------------------------------------------------------------
+SUMMARY: RECOMMENDED TECH STACK FOR ML COMPONENT
+--------------------------------------------------------------------------------
+
+  Language:       TypeScript (no new dependencies)
+  Algorithm:      Logistic Regression (softmax) with SGD + L2 regularization
+  Features:       TF-IDF (top 300 terms) + amount bucket + day-of-week
+  Fallback:       k-NN cosine similarity on TF-IDF vectors
+  Baseline:       Deterministic merchant lookup table (200 entries)
+  Storage:        localStorage (model ~12KB, buffer ~50KB max)
+  Training:       In-browser, triggered on corrections, < 5ms for 200 examples
+  Inference:      < 1ms, synchronous, no async required
+  Privacy:        100% on-device, zero telemetry, zero external API calls
+  Dependencies:   None (pure TypeScript math)
+  Files added:    7 new files in src/lib/ml/
+  Files changed:  src/components/ExpenseForm.tsx (suggestion UI)
+                  src/app/settings/page.tsx (new page, ML settings)
+
+Total estimated LOC: ~450 lines of new TypeScript code.
+
+================================================================================
+END OF TECHNICAL ANALYSIS
+================================================================================

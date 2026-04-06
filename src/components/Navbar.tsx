@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Download, Plus, Wallet, Tag, Store } from 'lucide-react';
+import { Download, Plus, Wallet, Tag, Store, Lightbulb } from 'lucide-react';
 
 interface NavbarProps {
   onAddClick: () => void;
@@ -49,6 +49,17 @@ export default function Navbar({ onAddClick, onExport }: NavbarProps) {
             >
               <Store size={14} />
               Vendors
+            </Link>
+            <Link
+              href="/insights"
+              className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                pathname === '/insights'
+                  ? 'bg-indigo-50 text-indigo-700'
+                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              <Lightbulb size={14} />
+              Insights
             </Link>
           </div>
 

@@ -1,0 +1,77 @@
+FEATURE: Top Vendors Page
+BRANCH: feature/top-vendors
+WORKTREE: expense-tracker-top-vendors
+BUILD STATUS: PASSED
+
+== WHAT WAS IMPLEMENTED ==
+
+A dedicated analytics page at /vendors showing spending aggregated by vendor (merchant),
+derived from the expense description field. Includes a ranked list with medal icons for
+top 3, a live search/filter bar, date range filtering, per-vendor stats (total, visits,
+average), and summary cards. The Navbar gained a "Vendors" navigation link.
+
+== FILES CREATED ==
+
+src/app/vendors/page.tsx
+  - 'use client' page reading from localStorage via getExpenses()
+  - Date range filter buttons: This Month / Last 3 Months / Last 6 Months / All Time
+    (uses date-fns subMonths + isAfter + parseISO)
+  - Search bar: real-time filter of vendor list by name (case-insensitive)
+  - Summary stat cards (3-col): Total Vendors count, Top Vendor name+amount, Avg per Vendor
+  - Ranked VendorRankCard list sorted by total spending desc
+  - Shows result count + search term in sub-heading
+  - Two empty states: no expenses in range vs no vendors match search
+  - Vendor grouping logic:
+    * key = description.trim().toLowerCase() (normalized for grouping)
+    * displayName = original casing of the description (first occurrence wins, then npm overrides with newest due to iteration order)
+    * topCategory = most frequent Category across all expenses for that vendor
+    * average = total / count
+
+src/components/VendorRankCard.tsx
+  - Displays one vendor row: rank badge, vendor name (truncated), category badge, total, visit count, avg spend
+  - Medal colors for rank 1/2/3: gold (#f59e0b), silver (#9ca3af), bronze (#b45309)
+    Applied to rank badge background (20% opacity) and progress bar
+  - Ranks 4+ use gray badge + indigo-500 progress bar
+  - Horizontal progress bar: width = (total/maxTotal)*100%
+  - Uses CATEGORY_BG from types for the category badge
+
+== FILES MODIFIED ==
+
+src/components/Navbar.tsx
+  - Added Link from 'next/link', usePathname from 'next/navigation'
+  - Added Store icon from lucide-react
+  - Added "Vendors" nav link to /vendors with active highlight
+  - Logo + nav link wrapped in flex gap-4 container
+
+== DEPENDENCIES ADDED ==
+None (date-fns, lucide-react all already installed)
+
+== BUILD RESULT ==
+Route (app)                              Size     First Load JS
+┌ ○ /                                    135 kB          231 kB
+├ ○ /_not-found                          873 B          88.2 kB
+└ ○ /vendors                             3.75 kB        99.2 kB
+✓ Compiled successfully, no type errors
+
+Note: npm install was required in this worktree (node_modules copy was incomplete).
+All dependencies installed cleanly from package.json.
+
+== INTEGRATION NOTES ==
+
+1. The /vendors route is standalone — add it to the merged app by:
+   - Copying src/app/vendors/page.tsx
+   - Copying src/components/VendorRankCard.tsx
+   - Updating Navbar.tsx to add the Vendors link
+
+2. Vendor = expense description field. No schema changes needed. The description field
+   that users type when adding expenses IS the vendor name.
+
+3. When merging with the Categories feature, combine both nav links (Categories + Vendors)
+   in the Navbar at once to avoid conflicts.
+
+4. The search is client-side only, instant, no debouncing needed (localStorage is fast).
+
+5. The topCategory per vendor is computed as the mode (most frequent) of all expense
+   categories associated with that vendor name. If tied, the first in iteration order wins.
+
+6. Edge case: expenses with empty description are skipped (key = '' is filtered out).

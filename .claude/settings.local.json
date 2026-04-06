@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)",
+      "Read(//c/Users/Lenovo/OneDrive/Desktop/ET-Main/expense-tracker-login/src/lib//**)",
+      "Read(//c/Users/Lenovo/OneDrive/Desktop/ET-Main/expense-tracker-login/src/app/login//**)",
+      "Read(//c/Users/Lenovo/OneDrive/Desktop/ET-Main/expense-tracker-login/src/components/**)",
+      "Bash(git checkout:*)",
+      "Bash(git merge:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(node_modules/.bin/tsc:*)",
+      "Bash(npm run:*)",
+      "Bash(git branch:*)",
+      "Bash(git worktree:*)"
+    ]
+  }
+}

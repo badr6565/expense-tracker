@@ -1,8 +1,9 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { BarChart2, TrendingUp, Tag } from 'lucide-react';
+import { BarChart2, TrendingUp, Tag, ArrowLeft } from 'lucide-react';
 import { getExpenses } from '@/lib/storage';
 import { CATEGORIES, CATEGORY_COLORS, Category } from '@/types/expense';
 import { formatCurrency } from '@/lib/utils';
@@ -27,6 +28,7 @@ function getCutoff(range: Range): Date | null {
 }
 
 export default function CategoriesPage() {
+  const router = useRouter();
   const [range, setRange] = useState<Range>('all');
 
   const expenses = useMemo(() => {
@@ -67,12 +69,21 @@ export default function CategoriesPage() {
     <div className="min-h-screen bg-gray-50">
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
         {/* Header */}
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <Tag size={22} className="text-indigo-600" />
-            Top Expense Categories
-          </h1>
-          <p className="text-sm text-gray-500 mt-1">Understand where your money goes</p>
+        <div className="flex items-start gap-3">
+          <button
+            onClick={() => router.back()}
+            className="mt-0.5 p-2 rounded-xl hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors"
+            aria-label="Go back"
+          >
+            <ArrowLeft size={20} />
+          </button>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+              <Tag size={22} className="text-indigo-600" />
+              Top Expense Categories
+            </h1>
+            <p className="text-sm text-gray-500 mt-1">Understand where your money goes</p>
+          </div>
         </div>
 
         {/* Date range filter */}

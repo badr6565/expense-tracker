@@ -1,7 +1,8 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Store, TrendingUp, Users, Search } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Store, TrendingUp, Users, Search, ArrowLeft } from 'lucide-react';
 import { getExpenses } from '@/lib/storage';
 import { Category } from '@/types/expense';
 import { formatCurrency } from '@/lib/utils';
@@ -35,6 +36,7 @@ interface VendorStat {
 }
 
 export default function VendorsPage() {
+  const router = useRouter();
   const [range, setRange] = useState<Range>('all');
   const [search, setSearch] = useState('');
 
@@ -98,12 +100,21 @@ export default function VendorsPage() {
     <div className="min-h-screen bg-gray-50">
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
         {/* Header */}
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <Store size={22} className="text-indigo-600" />
-            Top Vendors
-          </h1>
-          <p className="text-sm text-gray-500 mt-1">Your most frequented merchants and services</p>
+        <div className="flex items-start gap-3">
+          <button
+            onClick={() => router.back()}
+            className="mt-0.5 p-2 rounded-xl hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors"
+            aria-label="Go back"
+          >
+            <ArrowLeft size={20} />
+          </button>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+              <Store size={22} className="text-indigo-600" />
+              Top Vendors
+            </h1>
+            <p className="text-sm text-gray-500 mt-1">Your most frequented merchants and services</p>
+          </div>
         </div>
 
         {/* Date range filter */}

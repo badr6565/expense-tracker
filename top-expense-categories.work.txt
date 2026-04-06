@@ -1,0 +1,68 @@
+FEATURE: Top Expense Categories Page
+BRANCH: feature/top-expense-categories
+WORKTREE: expense-tracker-top-expense-categories
+BUILD STATUS: PASSED
+
+== WHAT WAS IMPLEMENTED ==
+
+A dedicated analytics page at /categories showing expense spending broken down by
+category. Includes a donut chart (recharts), ranked category cards with progress bars,
+date range filtering, and summary stats. The Navbar gained a "Categories" navigation link.
+
+== FILES CREATED ==
+
+src/app/categories/page.tsx
+  - 'use client' page reading from localStorage via getExpenses()
+  - Date range filter buttons: This Month / Last 3 Months / Last 6 Months / All Time
+    (uses date-fns subMonths + isAfter + parseISO for filtering)
+  - Summary stat cards (3-col grid): Total Spending, Most Spent Category, Categories Used
+  - Donut chart: recharts PieChart + Pie (innerRadius=70, outerRadius=110) + Cell (per-category colors from CATEGORY_COLORS) + Tooltip + Legend
+  - Ranked list: CategoryRankCard components sorted by total descending
+  - Empty state: icon + friendly message when no expenses in range
+
+src/components/CategoryRankCard.tsx
+  - Displays one category row: rank number, CATEGORY_BG badge, total amount, transaction count
+  - Percentage of grand total shown
+  - Horizontal progress bar colored with CATEGORY_COLORS, width = (total/maxTotal)*100%
+
+== FILES MODIFIED ==
+
+src/components/Navbar.tsx
+  - Added Link import from 'next/link'
+  - Added usePathname from 'next/navigation'
+  - Added Store → Tag icon import from lucide-react
+  - Added "Categories" nav link to /categories with active highlight (indigo-50/indigo-700)
+  - Logo + nav links wrapped in a flex gap-4 container for layout
+
+== DEPENDENCIES ADDED ==
+None (recharts, date-fns, lucide-react all already installed)
+
+== BUILD RESULT ==
+Route (app)                              Size     First Load JS
+┌ ○ /                                    30.5 kB         233 kB
+├ ○ /_not-found                          873 B          88.2 kB
+└ ○ /categories                          3.46 kB         206 kB
+✓ Compiled successfully, no type errors
+
+Note: One type error was encountered and fixed during development:
+  recharts Tooltip formatter type required (value: ValueType | undefined) not (value: number)
+  Fix: changed formatter={(value: number) => ...} to formatter={(value) => [formatCurrency(Number(value)), 'Spent']}
+
+== INTEGRATION NOTES ==
+
+1. The /categories route is standalone — add it to the merged app by:
+   - Copying src/app/categories/page.tsx
+   - Copying src/components/CategoryRankCard.tsx
+   - Updating Navbar.tsx to add the Categories link
+
+2. The updated Navbar requires Link from 'next/link' and usePathname from 'next/navigation'.
+   These are already available in Next.js 14 — no new packages needed.
+
+3. When merging with the Vendors feature, combine both nav links in the Navbar at once
+   to avoid double-modifying that file.
+
+4. The page reads directly from localStorage via getExpenses() — it respects whatever
+   expenses are already stored. No migration or data changes needed.
+
+5. The Navbar onAddClick and onExport props remain unchanged — this is a backward-compatible
+   modification. The main page.tsx does not need changes.

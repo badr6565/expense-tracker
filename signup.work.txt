@@ -1,0 +1,74 @@
+FEATURE: Signup Page
+BRANCH: feature/signup
+WORKTREE: expense-tracker-signup
+BUILD STATUS: PASSED
+
+== WHAT WAS IMPLEMENTED ==
+
+A complete signup page for the ExpenseTracker app using localStorage-based authentication.
+Users can create accounts that persist in localStorage, immediately log in, and access the
+main dashboard. An AuthGuard component protects all routes and redirects unauthenticated
+users to the login page.
+
+== FILES CREATED ==
+
+src/lib/auth.ts
+  - User type definition (id, name, email, passwordHash, createdAt)
+  - getUsers() / saveUsers() - localStorage CRUD for user list (key: et_users)
+  - findUserByEmail() - case-insensitive email lookup
+  - createUser() - creates user with btoa-encoded password, returns User
+  - verifyPassword() - compare credentials
+  - getCurrentUser() / setCurrentUser() / logout() - session management (key: et_current_user)
+  - seedDemoUser() - creates demo@example.com / password123 if no users exist
+
+src/app/signup/page.tsx
+  - 'use client' page
+  - Fields: Full Name, Email, Password (show/hide), Confirm Password (show/hide)
+  - Validation: required fields, email format, min 8-char password, passwords match
+  - Duplicate email check against localStorage
+  - On success: createUser() + setCurrentUser() + router.replace('/')
+  - Error banner with AlertCircle icon for validation/duplicate errors
+  - Loading state on submit button
+  - Link to /login
+  - App logo (Wallet icon + "ExpenseTracker" text) at top
+  - Centered white card layout matching existing app style
+
+src/components/AuthGuard.tsx
+  - 'use client' component wrapping entire app via layout.tsx
+  - Reads getCurrentUser() on mount
+  - Unauthenticated + non-public path → redirect to /login
+  - Authenticated + public path (/login, /signup) → redirect to /
+  - Shows spinner while auth check runs on protected pages
+
+== FILES MODIFIED ==
+
+src/app/layout.tsx
+  - Added AuthGuard import
+  - Wrapped {children} with <AuthGuard>{children}</AuthGuard>
+
+== DEPENDENCIES ADDED ==
+None (lucide-react already installed)
+
+== BUILD RESULT ==
+Route (app)                              Size     First Load JS
+┌ ○ /                                    135 kB          223 kB
+├ ○ /_not-found                          873 B          88.2 kB
+└ ○ /signup                              11.9 kB        99.2 kB
+✓ Compiled successfully, no type errors
+
+== INTEGRATION NOTES ==
+
+1. This feature introduces src/lib/auth.ts — share this exact file with the login feature
+   to ensure both use the same localStorage keys (et_users, et_current_user).
+
+2. AuthGuard in layout.tsx is the auth enforcement mechanism. When merging:
+   - Add AuthGuard to the root layout.tsx of the main branch.
+   - PUBLIC_PATHS = ['/login', '/signup'] — expand this array as needed.
+
+3. Password storage uses btoa() encoding — NOT real hashing. This is acceptable for a
+   localStorage-only demo app. For production, replace with a real auth backend.
+
+4. The Navbar in the main app should add a logout button that calls logout() from auth.ts
+   and redirects to /login.
+
+5. Integration order: merge login + signup together since they share auth.ts.
