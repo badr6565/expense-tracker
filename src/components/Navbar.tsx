@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Download, Plus, Wallet, Tag } from 'lucide-react';
+import { Download, Plus, Wallet, Tag, Store } from 'lucide-react';
 
 interface NavbarProps {
   onAddClick: () => void;
@@ -16,7 +16,7 @@ export default function Navbar({ onAddClick, onExport }: NavbarProps) {
     <nav className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-gray-100 shadow-sm">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
-          {/* Logo */}
+          {/* Logo + nav links */}
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-indigo-600 rounded-xl">
@@ -38,6 +38,17 @@ export default function Navbar({ onAddClick, onExport }: NavbarProps) {
             >
               <Tag size={14} />
               Categories
+            </Link>
+            <Link
+              href="/vendors"
+              className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                pathname === '/vendors'
+                  ? 'bg-indigo-50 text-indigo-700'
+                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              <Store size={14} />
+              Vendors
             </Link>
           </div>
 
